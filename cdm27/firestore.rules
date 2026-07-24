@@ -1,0 +1,52 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Profils utilisateurs
+    match /users/{uid} {
+      allow read: if request.auth != null;
+
+      // Création autorisée uniquement par le propriétaire du compte.
+      // isAdmin ne peut être "true" à la création que si c'est le tout
+      // premier utilisateur (le document meta/compteurs n'existe pas encore).
+      allow create: if request.auth != null
+        && request.auth.uid == uid
+        && (
+          request.resource.data.isAdmin == false
+          || !exists(/databases/$(database)/documents/meta/compteurs)
+        );
+
+      // Un utilisateur peut mettre à jour son profil mais jamais son propre
+      // statut isAdmin (protège contre une élévation de privilèges côté client).
+      allow update: if request.auth != null
+        && request.auth.uid == uid
+        && request.resource.data.isAdmin == resource.data.isAdmin;
+    }
+
+    // Document technique utilisé pour savoir si le premier compte a été créé
+    match /meta/{docId} {
+      allow read: if true;
+      allow create: if request.auth != null;
+      allow update: if false;
+    }
+
+    // Matchs : lecture pour tous les utilisateurs connectés,
+    // écriture réservée aux administrateurs.
+    match /matches/{matchId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true;
+    }
+
+    // Pronostics : chaque utilisateur ne peut lire/écrire que les siens
+    // pour l'écriture, mais la lecture est ouverte à tous (nécessaire
+    // pour calculer le classement général côté client).
+    match /pronostics/{pronosticId} {
+      allow read: if request.auth != null;
+      allow create, update: if request.auth != null
+        && request.resource.data.uid == request.auth.uid;
+      allow delete: if false;
+    }
+  }
+}
